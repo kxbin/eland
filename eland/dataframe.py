@@ -1450,7 +1450,8 @@ class DataFrame(NDFrame):
         """
         Iterate over eland.DataFrame rows as (index, pandas.Series) pairs.
 
-        Yields:
+        Yields
+        ------
             index: index
                 The index of the row.
             data: pandas Series
@@ -1496,13 +1497,15 @@ class DataFrame(NDFrame):
         """
         Iterate over eland.DataFrame rows as namedtuples.
 
-        Args:
+        Args
+        ----
             index: bool, default True
                 If True, return the index as the first element of the tuple.
             name: str or None, default "Eland"
                 The name of the returned namedtuples or None to return regular tuples.
 
-        Returns:
+        Returns
+        -------
             iterator
                 An object to iterate over namedtuples for each row in the
                 DataFrame with the first field possibly being the index and
