@@ -36,7 +36,7 @@ import pandas as pd  # type: ignore
 from eland.common import (
     DEFAULT_PROGRESS_REPORTING_NUM_ROWS,
     elasticsearch_date_to_pandas_date,
-    ensure_es_client
+    ensure_es_client,
 )
 from eland.field_mappings import FieldMappings
 from eland.filter import BooleanFilter, QueryFilter
