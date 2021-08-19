@@ -1253,7 +1253,7 @@ class Operations:
         df_list = []
         df_row_count = 0
 
-        for df in self._search_yield_pandas_dataframe(query_compiler=query_compiler):
+        for df in self.search_yield_pandas_dataframe(query_compiler=query_compiler):
             df_row_count = df_row_count + len(df)
 
             df_list.append(df)
