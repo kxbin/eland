@@ -18,12 +18,12 @@
 import copy
 import warnings
 from collections import defaultdict
+from datetime import datetime
 from typing import (
     TYPE_CHECKING,
     Any,
     Dict,
     Generator,
-    Iterable,
     List,
     Optional,
     Sequence,
@@ -40,6 +40,7 @@ from eland.actions import PostProcessingAction
 from eland.common import (
     DEFAULT_PAGINATION_SIZE,
     DEFAULT_PIT_KEEP_ALIVE,
+    DEFAULT_PROGRESS_REPORTING_NUM_ROWS,
     DEFAULT_SEARCH_SIZE,
     SortOrder,
     build_pd_series,
@@ -1196,64 +1197,6 @@ class Operations:
             ["count", "mean", "std", "min", "25%", "50%", "75%", "max"]
         )
 
-    def iterrows(
-        self, query_compiler: "QueryCompiler"
-    ) -> Iterable[Tuple[Union[str, Tuple[str, ...]], pd.Series]]:
-        query_params, post_processing = self._resolve_tasks(query_compiler)
-        result_size, sort_params = Operations._query_params_to_size_and_sort(
-            query_params
-        )
-
-        script_fields = query_params.script_fields
-        query = Query(query_params.query)
-
-        body = query.to_search_body()
-        if script_fields is not None:
-            body["script_fields"] = script_fields
-
-        # Only return requested field_names and add them to body
-        _source = query_compiler.get_field_names(include_scripted_fields=False)
-        body["_source"] = _source if _source else False
-
-        if sort_params:
-            body["sort"] = [sort_params]
-
-        for hits in _search_yield_hits(
-            query_compiler=query_compiler, body=body, max_number_of_hits=result_size
-        ):
-            df = query_compiler._es_results_to_pandas(hits)
-            df = self._apply_df_post_processing(df, post_processing)
-            yield from df.iterrows()
-
-    def itertuples(
-        self, query_compiler: "QueryCompiler", index: bool, name: Union[str, None]
-    ) -> Iterable[Tuple[Any, ...]]:
-        query_params, post_processing = self._resolve_tasks(query_compiler)
-        result_size, sort_params = Operations._query_params_to_size_and_sort(
-            query_params
-        )
-
-        script_fields = query_params.script_fields
-        query = Query(query_params.query)
-
-        body = query.to_search_body()
-        if script_fields is not None:
-            body["script_fields"] = script_fields
-
-        # Only return requested field_names and add them to body
-        _source = query_compiler.get_field_names(include_scripted_fields=False)
-        body["_source"] = _source if _source else False
-
-        if sort_params:
-            body["sort"] = [sort_params]
-
-        for hits in _search_yield_hits(
-            query_compiler=query_compiler, body=body, max_number_of_hits=result_size
-        ):
-            df = query_compiler._es_results_to_pandas(hits)
-            df = self._apply_df_post_processing(df, post_processing)
-            yield from df.itertuples(index=index, name=name)
-
     def to_pandas(
         self, query_compiler: "QueryCompiler", show_progress: bool = False
     ) -> pd.DataFrame:
@@ -1270,9 +1213,9 @@ class Operations:
         df = self._es_results(query_compiler, show_progress)
         return df.to_csv(**kwargs)  # type: ignore[no-any-return]
 
-    def _es_results(
-        self, query_compiler: "QueryCompiler", show_progress: bool = False
-    ) -> pd.DataFrame:
+    def search_yield_pandas_dataframe(
+        self, query_compiler: "QueryCompiler"
+    ) -> Generator["pd.DataFrame", None, None]:
         query_params, post_processing = self._resolve_tasks(query_compiler)
 
         result_size, sort_params = Operations._query_params_to_size_and_sort(
@@ -1293,18 +1236,37 @@ class Operations:
         if sort_params:
             body["sort"] = [sort_params]
 
-        es_results: List[Dict[str, Any]] = sum(
-            _search_yield_hits(
-                query_compiler=query_compiler, body=body, max_number_of_hits=result_size
-            ),
-            [],
-        )
+        for hits in _search_yield_hits(
+            query_compiler=query_compiler, body=body, max_number_of_hits=result_size
+        ):
+            df = query_compiler._es_results_to_pandas(hits)
+            df = self._apply_df_post_processing(df, post_processing)
+            yield df
 
-        df = query_compiler._es_results_to_pandas(
-            results=es_results, show_progress=show_progress
-        )
-        df = self._apply_df_post_processing(df, post_processing)
-        return df
+    def _es_results(
+        self, query_compiler: "QueryCompiler", show_progress: bool = False
+    ) -> pd.DataFrame:
+        # Put it in the list first, and then convert it into a pandas DataFrame
+        # which is faster than using pandas.DataFrame.append()
+        # https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.append.html
+
+        df_list = []
+        df_row_count = 0
+
+        for df in self._search_yield_pandas_dataframe(query_compiler=query_compiler):
+            df_row_count = df_row_count + len(df)
+
+            df_list.append(df)
+
+            if show_progress and (
+                df_row_count % DEFAULT_PROGRESS_REPORTING_NUM_ROWS == 0
+            ):
+                print(f"{datetime.now()}: read {df_row_count} rows")
+
+        if show_progress:
+            print(f"{datetime.now()}: read {df_row_count} rows")
+
+        return pd.concat(df_list)
 
     def index_count(self, query_compiler: "QueryCompiler", field: str) -> int:
         # field is the index field so count values
